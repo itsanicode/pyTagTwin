@@ -20,7 +20,7 @@ from __future__ import division
 
 from Autodesk.Revit import DB
 
-from tagtwin import geom, layout, results
+from tagtwin import declutter, geom, layout, results
 from tagtwin.revit import collect, compat
 
 #: what a tag's placement is recorded against
@@ -130,7 +130,11 @@ def learn_view(doc, view, options, level):
         samples.append(layout.TagSample(
             signature=record.signature(level), category=record.category,
             order_key=_order_key(view, record.point), placement=placement))
-    return layout.learn(samples), skipped
+    population = {}
+    for record in records.values():
+        key = record.signature(level)
+        population[key] = population.get(key, 0) + 1
+    return layout.learn(samples, population), skipped
 
 
 class Tagger(object):
@@ -192,10 +196,33 @@ class Tagger(object):
 
     # -- step 2: tag what is untagged --------------------------------------
 
+    def _wanted(self, records):
+        """Which elements should carry a tag, in reading order.
+
+        Only kinds the reference view actually tagged, and only as many of them
+        as it tagged - tagging every pipe when the reference tagged three is
+        what turns a clean drawing into a thicket.
+        """
+        grouped = {}
+        for record in records:
+            grouped.setdefault(record.signature(self.level), []).append(record)
+        wanted = []
+        for signature, entries in grouped.items():
+            if signature not in self.recipe.by_signature:
+                continue
+            entries.sort(key=lambda r: layout.sort_key(
+                _order_key(self.target_view, r.point)))
+            if self.options.match_tag_density:
+                count = self.recipe.tags_wanted(signature, len(entries))
+            else:
+                count = len(entries)
+            wanted.extend(entries[:count])
+        return wanted
+
     def tag_untagged(self, records, view_tags, report):
         """Place a tag on every element the reference view would have tagged."""
         created = 0
-        for record in records:
+        for record in self._wanted(records):
             placement, how = self.recipe.placement_for(
                 record.signature(self.level), record.category)
             if placement is None:
@@ -242,6 +269,7 @@ class Tagger(object):
         assignments = layout.assign(hosts, self.recipe, self.scale)
 
         moved = 0
+        self.placed = []
         for assignment in assignments:
             record = records_by_key.get(assignment.key)
             if record is None:
@@ -255,6 +283,7 @@ class Tagger(object):
                 continue
             for tag in view_tags.by_host.get(assignment.key, ()):
                 if self._place(tag, record, assignment, report):
+                    self.placed.append((tag, record, assignment))
                     moved += 1
         return moved, layout.summarise(assignments)
 
@@ -315,6 +344,7 @@ def apply_recipe(doc, source_view, target_view, recipe, options, level):
 
     moved, how = tagger.arrange(records_by_key, view_tags, report)
     report.note('Arranged {0} tag(s)'.format(moved))
+    Declutterer(doc, target_view, options, tagger.scale).run(tagger.placed, report)
     for reason in sorted(how):
         report.note('  {0}: {1}'.format(reason, how[reason]))
     if tagger.scale != 1.0:
@@ -326,3 +356,106 @@ def apply_recipe(doc, source_view, target_view, recipe, options, level):
 def _message(error):
     text = getattr(error, 'Message', None) or str(error)
     return ' '.join(str(text).split())[:200]
+
+
+def _view_box(view, bounding_box):
+    """A bounding box projected onto the view plane: ``(min_r, min_u, max_r, max_u)``.
+
+    The box Revit reports is axis-aligned in *model* space, so on an isometric
+    every one of its eight corners has to be projected to get the extents that
+    actually matter on the sheet.
+    """
+    right, up, _ = compat.view_axes(view)
+    minimum = compat.xyz_tuple(bounding_box.Min)
+    maximum = compat.xyz_tuple(bounding_box.Max)
+    rights = []
+    ups = []
+    for x in (minimum[0], maximum[0]):
+        for y in (minimum[1], maximum[1]):
+            for z in (minimum[2], maximum[2]):
+                corner = (x, y, z)
+                rights.append(geom.dot(corner, right))
+                ups.append(geom.dot(corner, up))
+    return (min(rights), min(ups), max(rights), max(ups))
+
+
+class Declutterer(object):
+    """Measures the placed tags and pushes the overlapping ones apart."""
+
+    def __init__(self, doc, view, options, scale):
+        self.doc = doc
+        self.view = view
+        self.options = options
+        self.scale = scale
+
+    def _paper_to_model(self, inches):
+        """Inches on the printed sheet, in model feet at this view's scale."""
+        try:
+            view_scale = float(self.view.Scale)
+        except Exception:
+            view_scale = 1.0
+        if view_scale <= 0.0:
+            view_scale = 1.0
+        return (inches / 12.0) * view_scale
+
+    def run(self, placed, report):
+        if not self.options.declutter_tags or len(placed) < 2:
+            return None
+        try:
+            self.doc.Regenerate()
+        except Exception:
+            pass
+
+        right, up, _ = compat.view_axes(self.view)
+        labels = []
+        by_key = {}
+        for tag, record, assignment in placed:
+            try:
+                box = tag.get_BoundingBox(self.view)
+            except Exception:
+                box = None
+            if box is None:
+                continue
+            min_r, min_u, max_r, max_u = _view_box(self.view, box)
+            try:
+                head = compat.xyz_tuple(tag.TagHeadPosition)
+            except Exception:
+                continue
+            centre = ((min_r + max_r) / 2.0, (min_u + max_u) / 2.0)
+            key = compat.eid_value(tag.Id)
+            labels.append(declutter.Label(
+                key=key, desired=centre,
+                half_width=max((max_r - min_r) / 2.0, 1e-4),
+                half_height=max((max_u - min_u) / 2.0, 1e-4),
+                anchor=(geom.dot(record.point, right), geom.dot(record.point, up))))
+            by_key[key] = (tag, head)
+
+        if len(labels) < 2:
+            return None
+
+        result = declutter.resolve(
+            labels,
+            gap=self._paper_to_model(self.options.declutter_gap_inches),
+            iterations=int(self.options.declutter_passes),
+            max_shift=self._paper_to_model(self.options.declutter_max_shift_inches))
+
+        nudged = 0
+        for label in result.labels:
+            shift = label.shift
+            if abs(shift[0]) < 1e-9 and abs(shift[1]) < 1e-9:
+                continue
+            tag, head = by_key[label.key]
+            try:
+                tag.TagHeadPosition = compat.to_xyz(
+                    geom.add(head, geom.add(geom.scale(right, shift[0]),
+                                            geom.scale(up, shift[1]))))
+                nudged += 1
+            except Exception:
+                continue
+        report.note('Decluttering: {0}'.format(result.summary()))
+        if result.remaining_overlaps:
+            report.note('  {0} tag(s) could not be separated without moving '
+                        'further than the limit - raise "max shift" in the '
+                        'settings, or move them by hand'.format(
+                            result.remaining_overlaps))
+        return result

@@ -201,3 +201,66 @@ def test_placement_distance_and_repr():
     assert placement.distance == 5.0
     assert placement.scaled(1.0) is placement
     assert 'Placement' in repr(placement)
+
+
+# --------------------------------------------------------------------------
+# tagging density - how many of a kind the reference view actually tagged
+# --------------------------------------------------------------------------
+
+@case
+def test_density_copies_how_much_the_reference_tagged():
+    """Tagging every pipe when the reference tagged three is what made a mess."""
+    recipe = layout.learn(
+        [sample(PIPE_CW, PIPES, (0, 9), (-2.0, 0.0)),
+         sample(PIPE_CW, PIPES, (0, 6), (-3.0, 0.0)),
+         sample(PIPE_CW, PIPES, (0, 3), (-4.0, 0.0))],
+        population={PIPE_CW: 30})
+    assert abs(recipe.density(PIPE_CW) - 0.1) < 1e-9
+    assert recipe.tags_wanted(PIPE_CW, 30) == 3
+    assert recipe.tags_wanted(PIPE_CW, 60) == 6
+
+
+@case
+def test_everything_tagged_stays_everything_tagged():
+    recipe = layout.learn(
+        [sample(VALVE, ACCESSORIES, (0, 9), (2.0, 0.0)),
+         sample(VALVE, ACCESSORIES, (0, 6), (2.0, 0.0))],
+        population={VALVE: 2})
+    assert recipe.density(VALVE) == 1.0
+    assert recipe.tags_wanted(VALVE, 7) == 7
+
+
+@case
+def test_at_least_one_is_tagged_when_the_reference_tagged_any():
+    recipe = layout.learn([sample(PIPE_CW, PIPES, (0, 0), (-2.0, 0.0))],
+                          population={PIPE_CW: 100})
+    assert recipe.tags_wanted(PIPE_CW, 3) == 1
+
+
+@case
+def test_untagged_kinds_are_never_tagged():
+    """The category fallback positions an existing tag; it never creates one."""
+    recipe = layout.learn([sample(PIPE_CW, PIPES, (0, 0), (-2.0, 0.0))],
+                          population={PIPE_CW: 4, PIPE_HW: 9})
+    assert recipe.tags_wanted(PIPE_HW, 9) == 0
+    # but if one is already there, it still gets positioned
+    hosts = [host(1, PIPE_HW, PIPES, (0, 0))]
+    assert layout.assign(hosts, recipe)[0].how == layout.CATEGORY
+
+
+@case
+def test_population_defaults_to_what_was_tagged():
+    recipe = layout.learn([sample(PIPE_CW, PIPES, (0, 0), (-2.0, 0.0))])
+    assert recipe.density(PIPE_CW) == 1.0
+
+
+@case
+def test_tagged_kinds_reports_busiest_first():
+    recipe = layout.learn(
+        [sample(PIPE_CW, PIPES, (0, 9), (-2.0, 0.0)),
+         sample(PIPE_CW, PIPES, (0, 6), (-3.0, 0.0)),
+         sample(VALVE, ACCESSORIES, (0, 3), (2.0, 0.0))],
+        population={PIPE_CW: 20, VALVE: 2})
+    rows = recipe.tagged_kinds()
+    assert rows[0][0] == PIPE_CW and rows[0][1] == 2 and rows[0][2] == 20
+    assert rows[1][0] == VALVE

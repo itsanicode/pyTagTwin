@@ -120,6 +120,7 @@ class LayoutRecipe(object):
         self.by_signature = {}
         self.by_category = {}
         self.tag_types = {}
+        self.population = {}
         self.sample_count = 0
 
     # -- reading ----------------------------------------------------------
@@ -142,6 +143,29 @@ class LayoutRecipe(object):
             return None
         return max(sorted(counts), key=lambda type_id: counts[type_id])
 
+    def density(self, signature):
+        """Share of that kind of element the reference view actually tagged.
+
+        Tagging every pipe when the reference tagged three of them is how a
+        clean drawing turns into a thicket, so the density is copied too.
+        """
+        tagged = len(self.by_signature.get(signature, ()))
+        if not tagged:
+            return 0.0
+        total = self.population.get(signature, tagged)
+        if total <= 0:
+            return 1.0
+        return min(1.0, tagged / float(total))
+
+    def tags_wanted(self, signature, available):
+        """How many of ``available`` elements of this kind should carry a tag."""
+        if signature not in self.by_signature:
+            return 0
+        if not available:
+            return 0
+        wanted = int(round(self.density(signature) * available))
+        return max(1, min(available, wanted))
+
     def placement_for(self, signature, category, rank=0):
         """``(placement, how)`` for the ``rank``-th element of its kind."""
         ordered = self.by_signature.get(signature)
@@ -160,13 +184,28 @@ class LayoutRecipe(object):
                                              len(self.by_signature),
                                              len(self.by_category)))
 
+    def tagged_kinds(self):
+        """``[(signature, tags, elements, density), ...]``, busiest first."""
+        rows = []
+        for signature in self.by_signature:
+            tagged = len(self.by_signature[signature])
+            rows.append((signature, tagged, self.population.get(signature, tagged),
+                         self.density(signature)))
+        rows.sort(key=lambda row: (-row[1], repr(row[0])))
+        return rows
+
     def __repr__(self):
         return '<LayoutRecipe {0}>'.format(self.describe())
 
 
-def learn(samples):
-    """Build a recipe from the tags of a reference view."""
+def learn(samples, population=None):
+    """Build a recipe from the tags of a reference view.
+
+    ``population`` is how many elements of each kind the reference view holds,
+    tagged or not, which is what makes the tagging *density* reproducible.
+    """
     recipe = LayoutRecipe()
+    recipe.population = dict(population or {})
     grouped = {}
     per_category = {}
     for sample in samples:

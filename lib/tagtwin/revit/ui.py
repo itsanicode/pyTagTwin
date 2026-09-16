@@ -25,6 +25,8 @@ TOGGLES = (
     ('adapt_to_view_scale', 'Adjust offsets and text width for the view scale'),
     ('skip_existing', 'Skip annotations that are already there'),
     ('tag_untagged_elements', 'Tag Like View: tag elements that have no tag yet'),
+    ('match_tag_density', 'Tag Like View: tag as many as the reference view did'),
+    ('declutter_tags', 'Tag Like View: push overlapping tags apart'),
     ('lock_3d_views', 'Lock target 3D views automatically (needed for tags)'),
     ('copy_tags', 'Copy tags'),
     ('copy_dimensions', 'Copy dimensions'),

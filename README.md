@@ -144,9 +144,29 @@ view, and replayed in that order onto the target view's valves — read top to
 bottom, then left to right, in both views. If the target has more of them, the
 pattern repeats rather than piling every extra tag onto the last offset.
 
-**When a kind of element was never tagged** in the reference view, Tag Twin
-falls back to the typical offset for that category, and says so in the report.
-If the category is unknown too, the tag is left where Revit put it and listed.
+**Only as many tags as the reference view placed.** If it tagged three of
+thirty identical pipes, Tag Twin tags three of thirty here, not all thirty —
+tagging everything is what turns a clean drawing into a thicket. Kinds of
+element the reference view never tagged are not tagged at all.
+
+**Overlapping tags are pushed apart.** Placing every tag at its learned offset
+is right until two of them want the same piece of paper, which happens wherever
+pipework converges. Tags that collide are gathered into runs and each run is
+laid out in order, evenly spaced, centred on where its members wanted to be. A
+tag with room to spare never moves.
+
+Two things this deliberately preserves:
+
+- **Order.** Tags keep the order their elements are in, so leaders never cross.
+- **Intent.** A tag is never moved further than *max shift* (1½" on the sheet by
+  default) from the offset it was given. Where crowding cannot be resolved
+  inside that limit, the tags left overlapping are reported rather than flung
+  somewhere they no longer read as belonging to their pipe.
+
+**When a kind of element was never tagged** in the reference view, an existing
+tag on it falls back to the typical offset for that category, and the report
+says so. If the category is unknown too, the tag is left where it was and
+listed.
 
 How alike two elements must be to share a tag position is looser than element
 matching needs to be — the question is only "does this kind of thing get its tag
@@ -296,7 +316,7 @@ the rest is development scaffolding that pyRevit ignores.
 extension.json                 what the Extension Manager shows
 lib/tagtwin/                   the engine
   geom.py  signature.py  spatial.py  align.py  matching.py   pure Python, no Revit
-  layout.py  outlook.py  options.py  results.py              pure Python, no Revit
+  layout.py  declutter.py  outlook.py  options.py  results.py  pure Python, no Revit
   revit/                       everything that touches the Revit API
 Tag Twin.tab/Replicate.panel/  the five ribbon buttons
 installer/                     install / uninstall without the Extension Manager
@@ -337,6 +357,8 @@ IronPython 2.7).
 | **Add and install** did nothing | Check the install path in the Extension Manager, then look for `pyTagTwin.extension` inside it. If the folder is there but empty, git could not reach GitHub from that machine — use the zip instead. |
 | "Revit only allows tags and dimensions in a locked 3D view" | Apply *Save Orientation and Lock View* to the target 3D view, or switch on **Lock target 3D views automatically**. |
 | Replicate Annotations will not place anything at all | Use **Tag Like View** instead. It needs no element match, only the same kinds of element, so it is the one to reach for when two views are similar rather than identical. |
+| Tags still overlap after a run | The crowding could not be resolved within *max shift*. Raise it in Settings, or widen the view. The report counts how many are left. |
+| Too many things got tagged | Tag Twin copies the reference view's tagging density, so check the reference: if it tags every pipe, so will this. Switch off "tag elements that have no tag yet" to only rearrange what is already there. |
 | Tag Like View left some tags where they were | The reference view never tagged that kind of element, so there was nothing to learn from. The report lists every one. Tag one of them in the reference view and run it again. |
 | "Nothing can be copied" although Preview Match found plenty | The elements that matched are not the ones carrying annotations. Preview Match now lists the annotated elements that have no twin — usually they are simply not visible in the target view, which they must be for a tag to attach. |
 | Match reads *poor* but the run works fine | Expected on a riser: coverage counts every pipe and fitting, most of which carry no tag. Look at **Annotations** and **Tagged elements** instead. |
