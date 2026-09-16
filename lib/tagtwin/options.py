@@ -39,7 +39,9 @@ class MatchOptions(object):
         ('declutter_gap_inches', 0.0625),
         ('declutter_max_shift_inches', 1.5),
         ('declutter_passes', 120),
-        ('layout_match_level', 'exact'),
+        ('placement_mode', 'margin'),      # margin | beside
+        ('margin_gutter_inches', 0.5),
+        ('layout_match_level', 'type+system'),
         ('lock_3d_views', False),
         ('copy_tags', True),
         ('copy_dimensions', True),
@@ -71,9 +73,12 @@ class MatchOptions(object):
     def layout_level(self):
         """How alike two elements must be to share a tag position.
 
-        Looser than element matching needs to be: the question is only "does
-        this kind of element get its tag up and to the left", so the system and
-        type usually carry it even when sizes differ.
+        Deliberately looser than element matching. The question is only "does
+        this kind of element get a tag, and where" - the type and system carry
+        that, and the exact signature does not, because it includes the
+        element's length. No two suites have pipes cut to the same lengths, so
+        matching on the exact signature skips nearly everything and almost no
+        tags get placed at all.
         """
         return {'exact': signature.STRICT,
                 'type+system': signature.MEDIUM,

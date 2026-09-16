@@ -144,6 +144,18 @@ view, and replayed in that order onto the target view's valves — read top to
 bottom, then left to right, in both views. If the target has more of them, the
 pattern repeats rather than piling every extra tag onto the last offset.
 
+**Where the tags go.** A riser's middle is nothing but dense, and past a
+certain crowding no offset works because the space is not there. So pipe and
+duct tags are sent out to a clear band beside the drawing, each at its own
+element's height, and stacked into a column with leaders running back in — which
+is what a drafter does, and it leaves the pipework itself readable. Point
+elements (fixtures, valves, equipment) keep the offset the reference view gave
+them, because a fixture tag reads better sitting on its fixture and fixtures are
+not what makes a riser unreadable.
+
+Set **placement** to `beside` in the settings to keep everything alongside its
+element instead.
+
 **Only as many tags as the reference view placed.** If it tagged three of
 thirty identical pipes, Tag Twin tags three of thirty here, not all thirty —
 tagging everything is what turns a clean drawing into a thicket. Kinds of
@@ -168,11 +180,11 @@ tag on it falls back to the typical offset for that category, and the report
 says so. If the category is unknown too, the tag is left where it was and
 listed.
 
-How alike two elements must be to share a tag position is looser than element
-matching needs to be — the question is only "does this kind of thing get its tag
-up and to the left". The default is the exact signature; drop it to *type and
-system* in the settings if a view tags several sizes of the same pipe the same
-way.
+How alike two elements must be to share a tag position is **type and system** by
+default, and deliberately looser than element matching. The exact signature
+includes the element's *length*, and no two suites have pipes cut to the same
+lengths — matching on it skips nearly everything and places almost no tags at
+all.
 
 ### Replicate Annotations
 
@@ -316,7 +328,8 @@ the rest is development scaffolding that pyRevit ignores.
 extension.json                 what the Extension Manager shows
 lib/tagtwin/                   the engine
   geom.py  signature.py  spatial.py  align.py  matching.py   pure Python, no Revit
-  layout.py  declutter.py  outlook.py  options.py  results.py  pure Python, no Revit
+  layout.py  margin.py  declutter.py  outlook.py               pure Python, no Revit
+  options.py  results.py                                      pure Python, no Revit
   revit/                       everything that touches the Revit API
 Tag Twin.tab/Replicate.panel/  the five ribbon buttons
 installer/                     install / uninstall without the Extension Manager
@@ -357,6 +370,7 @@ IronPython 2.7).
 | **Add and install** did nothing | Check the install path in the Extension Manager, then look for `pyTagTwin.extension` inside it. If the folder is there but empty, git could not reach GitHub from that machine — use the zip instead. |
 | "Revit only allows tags and dimensions in a locked 3D view" | Apply *Save Orientation and Lock View* to the target 3D view, or switch on **Lock target 3D views automatically**. |
 | Replicate Annotations will not place anything at all | Use **Tag Like View** instead. It needs no element match, only the same kinds of element, so it is the one to reach for when two views are similar rather than identical. |
+| Almost no tags appear | The matching level is set to *exact*, which includes the element's length. Set it to **type+system** in Settings. |
 | Tags still overlap after a run | The crowding could not be resolved within *max shift*. Raise it in Settings, or widen the view. The report counts how many are left. |
 | Too many things got tagged | Tag Twin copies the reference view's tagging density, so check the reference: if it tags every pipe, so will this. Switch off "tag elements that have no tag yet" to only rearrange what is already there. |
 | Tag Like View left some tags where they were | The reference view never tagged that kind of element, so there was nothing to learn from. The report lists every one. Tag one of them in the reference view and run it again. |

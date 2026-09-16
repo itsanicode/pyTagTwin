@@ -22,7 +22,7 @@ import math
 
 from Autodesk.Revit import DB
 
-from tagtwin import declutter, geom, layout, results
+from tagtwin import declutter, geom, layout, margin, results
 from tagtwin.revit import collect, compat
 
 #: what a tag's placement is recorded against
@@ -290,7 +290,7 @@ class Tagger(object):
     # -- step 3: arrange ----------------------------------------------------
 
     def arrange(self, records_by_key, view_tags, report):
-        """Move every tag onto the offset the reference view used."""
+        """Move every tag onto the position the reference view implies."""
         hosts = []
         for host_id in view_tags.by_host:
             record = records_by_key.get(host_id)
@@ -301,6 +301,7 @@ class Tagger(object):
                 category=record.category,
                 order_key=_order_key(self.target_view, record.point)))
         assignments = layout.assign(hosts, self.recipe)
+        targets = self._targets(assignments, records_by_key, report)
 
         moved = 0
         self.placed = []
@@ -308,7 +309,7 @@ class Tagger(object):
             record = records_by_key.get(assignment.key)
             if record is None:
                 continue
-            if not assignment.is_guided:
+            if assignment.key not in targets:
                 for tag in view_tags.by_host.get(assignment.key, ()):
                     report.add(results.ItemResult(
                         TAG_KIND, results.SKIPPED, compat.eid_value(tag.Id),
@@ -316,20 +317,67 @@ class Tagger(object):
                         None, record.label))
                 continue
             for tag in view_tags.by_host.get(assignment.key, ()):
-                if self._place(tag, record, assignment, report):
+                if self._place(tag, record, targets[assignment.key], report):
                     self.placed.append((tag, record, assignment))
                     moved += 1
         return moved, layout.summarise(assignments)
 
-    def _place(self, tag, record, assignment, report):
-        placement = assignment.placement
+    def _targets(self, assignments, records_by_key, report):
+        """``{host id: (right, up) offset from the host}`` for every tag.
+
+        In margin mode anything with a direction - the pipework, which is what
+        crowds a riser - is sent out to a clear band at the side of the drawing
+        with a leader back in. Point elements keep the offset the reference view
+        gave them: a fixture tag reads better sitting on its fixture, and
+        fixtures are not what makes the middle of a riser unreadable.
+        """
+        wants_margin = (self.options.placement_mode or 'margin').lower() == 'margin'
+        targets = {}
+        banded = []
+        for assignment in assignments:
+            record = records_by_key.get(assignment.key)
+            if record is None or not assignment.is_guided:
+                continue
+            axis, host_length = _host_frame(self.target_view, record)
+            if wants_margin and axis is not None:
+                banded.append((assignment.key,) + _order_key(self.target_view,
+                                                             record.point))
+                continue
+            targets[assignment.key] = assignment.placement.offset_in_view(
+                axis, host_length, self.scale)
+
+        if banded:
+            gutter = self._paper_to_model(self.options.margin_gutter_inches)
+            points = [_order_key(self.target_view, r.point)
+                      for r in records_by_key.values()]
+            band = margin.band_for(points, gutter)
+            _band, placements = margin.plan(banded, gutter, band)
+            for placement in placements:
+                targets[placement.key] = (placement.position[0] - placement.anchor[0],
+                                          placement.position[1] - placement.anchor[1])
+            counts = margin.summarise(placements)
+            report.note('Margin placement: {0} tag(s) to the left, {1} to the '
+                        'right, in a band {2:.2f} ft clear of the drawing'.format(
+                            counts.get(margin.LEFT, 0), counts.get(margin.RIGHT, 0),
+                            gutter))
+        return targets
+
+    def _paper_to_model(self, inches):
+        try:
+            view_scale = float(self.target_view.Scale)
+        except Exception:
+            view_scale = 1.0
+        if view_scale <= 0.0:
+            view_scale = 1.0
+        return (inches / 12.0) * view_scale
+
+    def _place(self, tag, record, offset, report):
+        """Put one tag at ``offset`` from its element, and fix up its leader."""
         tag_id = None
         try:
             tag_id = compat.eid_value(tag.Id)
         except Exception:
             pass
-        axis, host_length = _host_frame(self.target_view, record)
-        offset = placement.offset_in_view(axis, host_length, self.scale)
         try:
             tag.TagHeadPosition = _model_point(self.target_view, record.point,
                                                offset)
@@ -337,26 +385,35 @@ class Tagger(object):
             report.add(results.ItemResult(TAG_KIND, results.FAILED, tag_id,
                                           _message(error), None, record.label))
             return False
-        if placement.orientation is not None:
+        # a tag out in the margin is meaningless without something joining it
+        # back to the pipe it labels
+        if abs(offset[0]) + abs(offset[1]) > 1e-6:
             try:
-                tag.TagOrientation = placement.orientation
+                tag.HasLeader = True
             except Exception:
                 pass
-        elbow = placement.elbow_in_view(self.scale)
-        if elbow is not None:
-            try:
-                references = compat.tagged_references(tag)
-                if references:
-                    compat.set_leader_elbow(
-                        tag, references[0],
-                        _model_point(self.target_view, record.point,
-                                     (offset[0] + elbow[0], offset[1] + elbow[1])))
-            except Exception:
-                pass
+        self._set_elbow(tag, record, offset)
         report.add(results.ItemResult(TAG_KIND, results.CREATED, tag_id,
-                                      assignment.how, tag_id, record.label))
+                                      'placed', tag_id, record.label))
         return True
 
+    def _set_elbow(self, tag, record, offset):
+        """A short horizontal run off the tag before the leader turns inward."""
+        try:
+            references = compat.tagged_references(tag)
+        except Exception:
+            return
+        if not references:
+            return
+        run = self._paper_to_model(self.options.margin_gutter_inches) * 0.4
+        inward = -run if offset[0] > 0 else run
+        elbow = (offset[0] + inward, offset[1])
+        try:
+            compat.set_leader_elbow(
+                tag, references[0],
+                _model_point(self.target_view, record.point, elbow))
+        except Exception:
+            pass
 
 def apply_recipe(doc, source_view, target_view, recipe, options, level):
     """Tag and arrange one view. Must be called inside a transaction."""
@@ -501,11 +558,21 @@ class Declutterer(object):
         if len(labels) < 2:
             return None
 
+        # A tag beside its element must not wander far, or it stops reading as
+        # belonging to it. A tag already sent out to the margin is a different
+        # matter: stacking the column *is* the placement, and a column of thirty
+        # needs far more room than that limit allows.
+        if (self.options.placement_mode or 'margin').lower() == 'margin':
+            max_shift = None
+        else:
+            max_shift = self._paper_to_model(
+                self.options.declutter_max_shift_inches)
+
         result = declutter.resolve(
             labels,
             gap=self._paper_to_model(self.options.declutter_gap_inches),
             iterations=int(self.options.declutter_passes),
-            max_shift=self._paper_to_model(self.options.declutter_max_shift_inches))
+            max_shift=max_shift)
 
         nudged = 0
         for label in result.labels:
@@ -520,11 +587,12 @@ class Declutterer(object):
                 nudged += 1
             except Exception:
                 continue
-        report.note('Decluttering: {0} (gap {1:.2f} ft, limit {2:.2f} ft at '
-                    'this scale)'.format(
+        report.note('Decluttering: {0} (gap {1:.2f} ft, limit {2} at this '
+                    'scale)'.format(
                         result.summary(),
                         self._paper_to_model(self.options.declutter_gap_inches),
-                        self._paper_to_model(self.options.declutter_max_shift_inches)))
+                        'none' if max_shift is None
+                        else '{0:.2f} ft'.format(max_shift)))
         if result.remaining_overlaps:
             report.note('  {0} tag(s) could not be separated without moving '
                         'further than the limit - raise "max shift" in the '

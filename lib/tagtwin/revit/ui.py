@@ -96,10 +96,26 @@ def edit_options(options):
 
     mode = forms.CommandSwitchWindow.show(
         ['auto', 'model', 'view'],
-        message='How should annotation offsets be carried across?\n'
+        message='Replicate Annotations: how should offsets be carried across?\n'
                 'auto: model space for parallel views, view space otherwise')
     if mode:
         options.offset_mode = mode
+
+    placement = forms.CommandSwitchWindow.show(
+        ['margin', 'beside'],
+        message='Tag Like View: where should pipe and duct tags go?\n'
+                'margin: out to a clear band at the side, leadered back in\n'
+                'beside: alongside the element, as the reference view has them')
+    if placement:
+        options.placement_mode = placement
+
+    level = forms.CommandSwitchWindow.show(
+        ['type+system', 'type', 'exact'],
+        message='Tag Like View: how alike must two elements be to share a tag '
+                'position?\ntype+system is the sensible default - "exact" '
+                'includes the element\'s length, which no two suites share')
+    if level:
+        options.layout_match_level = level
     return options
 
 

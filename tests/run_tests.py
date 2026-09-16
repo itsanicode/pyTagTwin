@@ -22,12 +22,13 @@ import test_core        # noqa: E402
 import test_icons       # noqa: E402
 import test_declutter   # noqa: E402
 import test_layout      # noqa: E402
+import test_margin      # noqa: E402
 import test_outlook     # noqa: E402
 import test_package     # noqa: E402
 import test_refs        # noqa: E402  - installs a fake Revit API
 
-MODULES = (test_core, test_layout, test_declutter, test_outlook, test_refs,
-           test_icons, test_package, test_compat)
+MODULES = (test_core, test_layout, test_margin, test_declutter, test_outlook,
+           test_refs, test_icons, test_package, test_compat)
 
 
 def main(argv):
