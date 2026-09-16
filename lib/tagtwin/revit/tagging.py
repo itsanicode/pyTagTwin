@@ -18,6 +18,8 @@ shape - only to contain the same *kinds* of element.
 
 from __future__ import division
 
+import math
+
 from Autodesk.Revit import DB
 
 from tagtwin import declutter, geom, layout, results
@@ -40,6 +42,23 @@ def _model_point(view, origin, offset):
     moved = geom.add(origin, geom.add(geom.scale(right, offset[0]),
                                       geom.scale(up, offset[1])))
     return compat.to_xyz(moved)
+
+
+def _host_frame(view, record):
+    """``(unit axis in the view plane, projected length)`` for a linear host.
+
+    A pipe pointing straight at the viewer projects to nothing, and there is no
+    sensible "along" for it, so it falls back to a plain view offset.
+    """
+    axis = getattr(record, 'axis', None)
+    if not axis:
+        return None, 0.0
+    right, up, _ = compat.view_axes(view)
+    flat = (geom.dot(axis, right), geom.dot(axis, up))
+    length = math.sqrt(flat[0] * flat[0] + flat[1] * flat[1])
+    if length < 1e-6:
+        return None, 0.0
+    return (flat[0] / length, flat[1] / length), length
 
 
 def _order_key(view, point):
@@ -110,23 +129,38 @@ def learn_view(doc, view, options, level):
             skipped += 1
             continue
 
+        head_offset = _view_offset(view, record.point, head)
+
+        # the elbow is kept relative to the *head*, so the leader holds its
+        # shape wherever the head ends up - including after decluttering
         elbow_offset = None
         try:
             references = compat.tagged_references(tag)
             if references:
                 elbow = compat.get_leader_elbow(tag, references[0])
                 if elbow is not None:
-                    elbow_offset = _view_offset(view, record.point,
-                                                compat.xyz_tuple(elbow))
+                    elbow_view = _view_offset(view, record.point,
+                                              compat.xyz_tuple(elbow))
+                    elbow_offset = (elbow_view[0] - head_offset[0],
+                                    elbow_view[1] - head_offset[1])
         except Exception:
             elbow_offset = None
 
-        placement = layout.Placement(
-            tag_type=compat.eid_value(tag.GetTypeId()),
-            offset=_view_offset(view, record.point, head),
-            elbow=elbow_offset,
-            orientation=getattr(tag, 'TagOrientation', None),
-            has_leader=bool(getattr(tag, 'HasLeader', True)))
+        axis, host_length = _host_frame(view, record)
+        if axis is not None:
+            along, across = layout.host_frame_offset(head_offset, axis, host_length)
+            placement = layout.Placement(
+                tag_type=compat.eid_value(tag.GetTypeId()),
+                elbow=elbow_offset,
+                orientation=getattr(tag, 'TagOrientation', None),
+                has_leader=bool(getattr(tag, 'HasLeader', True)),
+                frame=layout.HOST_FRAME, along=along, across=across)
+        else:
+            placement = layout.Placement(
+                tag_type=compat.eid_value(tag.GetTypeId()),
+                offset=head_offset, elbow=elbow_offset,
+                orientation=getattr(tag, 'TagOrientation', None),
+                has_leader=bool(getattr(tag, 'HasLeader', True)))
         samples.append(layout.TagSample(
             signature=record.signature(level), category=record.category,
             order_key=_order_key(view, record.point), placement=placement))
@@ -266,7 +300,7 @@ class Tagger(object):
                 key=host_id, signature=record.signature(self.level),
                 category=record.category,
                 order_key=_order_key(self.target_view, record.point)))
-        assignments = layout.assign(hosts, self.recipe, self.scale)
+        assignments = layout.assign(hosts, self.recipe)
 
         moved = 0
         self.placed = []
@@ -294,9 +328,11 @@ class Tagger(object):
             tag_id = compat.eid_value(tag.Id)
         except Exception:
             pass
+        axis, host_length = _host_frame(self.target_view, record)
+        offset = placement.offset_in_view(axis, host_length, self.scale)
         try:
             tag.TagHeadPosition = _model_point(self.target_view, record.point,
-                                               placement.offset)
+                                               offset)
         except Exception as error:
             report.add(results.ItemResult(TAG_KIND, results.FAILED, tag_id,
                                           _message(error), None, record.label))
@@ -306,14 +342,15 @@ class Tagger(object):
                 tag.TagOrientation = placement.orientation
             except Exception:
                 pass
-        if placement.elbow is not None:
+        elbow = placement.elbow_in_view(self.scale)
+        if elbow is not None:
             try:
                 references = compat.tagged_references(tag)
                 if references:
                     compat.set_leader_elbow(
                         tag, references[0],
                         _model_point(self.target_view, record.point,
-                                     placement.elbow))
+                                     (offset[0] + elbow[0], offset[1] + elbow[1])))
             except Exception:
                 pass
         report.add(results.ItemResult(TAG_KIND, results.CREATED, tag_id,
@@ -344,6 +381,11 @@ def apply_recipe(doc, source_view, target_view, recipe, options, level):
 
     moved, how = tagger.arrange(records_by_key, view_tags, report)
     report.note('Arranged {0} tag(s)'.format(moved))
+    host_framed = sum(1 for placements in recipe.by_signature.values()
+                      for p in placements if p.frame == layout.HOST_FRAME)
+    report.note('  {0} of {1} learned placements follow the element they label '
+                '(the rest are plain offsets)'.format(host_framed,
+                                                      recipe.sample_count))
     Declutterer(doc, target_view, options, tagger.scale).run(tagger.placed, report)
     for reason in sorted(how):
         report.note('  {0}: {1}'.format(reason, how[reason]))
@@ -358,25 +400,13 @@ def _message(error):
     return ' '.join(str(text).split())[:200]
 
 
-def _view_box(view, bounding_box):
-    """A bounding box projected onto the view plane: ``(min_r, min_u, max_r, max_u)``.
+#: a tag's graphic is roughly this much of its text size per character, and
+#: this much line height. Rough is fine - it decides spacing, not geometry.
+TEXT_WIDTH_FACTOR = 0.62
+LINE_HEIGHT_FACTOR = 1.3
 
-    The box Revit reports is axis-aligned in *model* space, so on an isometric
-    every one of its eight corners has to be projected to get the extents that
-    actually matter on the sheet.
-    """
-    right, up, _ = compat.view_axes(view)
-    minimum = compat.xyz_tuple(bounding_box.Min)
-    maximum = compat.xyz_tuple(bounding_box.Max)
-    rights = []
-    ups = []
-    for x in (minimum[0], maximum[0]):
-        for y in (minimum[1], maximum[1]):
-            for z in (minimum[2], maximum[2]):
-                corner = (x, y, z)
-                rights.append(geom.dot(corner, right))
-                ups.append(geom.dot(corner, up))
-    return (min(rights), min(ups), max(rights), max(ups))
+#: 3/32" on paper, in feet - Revit's usual default text size
+DEFAULT_TEXT_SIZE = 3.0 / 32.0 / 12.0
 
 
 class Declutterer(object):
@@ -387,16 +417,58 @@ class Declutterer(object):
         self.view = view
         self.options = options
         self.scale = scale
+        self._text_sizes = {}
 
     def _paper_to_model(self, inches):
         """Inches on the printed sheet, in model feet at this view's scale."""
+        return (inches / 12.0) * self._view_scale()
+
+    def _view_scale(self):
         try:
-            view_scale = float(self.view.Scale)
+            value = float(self.view.Scale)
         except Exception:
-            view_scale = 1.0
-        if view_scale <= 0.0:
-            view_scale = 1.0
-        return (inches / 12.0) * view_scale
+            return 1.0
+        return value if value > 0.0 else 1.0
+
+    def _text_size(self, type_id):
+        """The tag type's text height in paper feet."""
+        key = compat.eid_value(type_id)
+        if key in self._text_sizes:
+            return self._text_sizes[key]
+        size = DEFAULT_TEXT_SIZE
+        parameter = compat.builtin('TEXT_SIZE')
+        try:
+            tag_type = self.doc.GetElement(type_id)
+            if tag_type is not None and parameter is not None:
+                found = tag_type.get_Parameter(parameter)
+                if found is not None and found.HasValue:
+                    value = found.AsDouble()
+                    if value > 0.0:
+                        size = value
+        except Exception:
+            pass
+        self._text_sizes[key] = size
+        return size
+
+    def _half_extents(self, tag):
+        """Half width and height of the tag's *text*, in model feet.
+
+        Deliberately not ``get_BoundingBox``: a tag's bounding box includes its
+        leader, so a tag on a six foot leader measures six feet wide. Feeding
+        that to the solver makes every tag look like it collides with every
+        other one, and it shoves the whole drawing apart - which is worse than
+        the overlap it was trying to fix.
+        """
+        text = ''
+        try:
+            text = tag.TagText or ''
+        except Exception:
+            text = ''
+        lines = text.split('\n') if text else ['']
+        columns = max(len(line) for line in lines) or 1
+        size = self._text_size(tag.GetTypeId()) * self._view_scale()
+        return (columns * size * TEXT_WIDTH_FACTOR / 2.0,
+                len(lines) * size * LINE_HEIGHT_FACTOR / 2.0)
 
     def run(self, placed, report):
         if not self.options.declutter_tags or len(placed) < 2:
@@ -411,22 +483,18 @@ class Declutterer(object):
         by_key = {}
         for tag, record, assignment in placed:
             try:
-                box = tag.get_BoundingBox(self.view)
-            except Exception:
-                box = None
-            if box is None:
-                continue
-            min_r, min_u, max_r, max_u = _view_box(self.view, box)
-            try:
                 head = compat.xyz_tuple(tag.TagHeadPosition)
             except Exception:
                 continue
-            centre = ((min_r + max_r) / 2.0, (min_u + max_u) / 2.0)
+            if head is None:
+                continue
+            half_width, half_height = self._half_extents(tag)
             key = compat.eid_value(tag.Id)
             labels.append(declutter.Label(
-                key=key, desired=centre,
-                half_width=max((max_r - min_r) / 2.0, 1e-4),
-                half_height=max((max_u - min_u) / 2.0, 1e-4),
+                key=key,
+                desired=(geom.dot(head, right), geom.dot(head, up)),
+                half_width=max(half_width, 1e-4),
+                half_height=max(half_height, 1e-4),
                 anchor=(geom.dot(record.point, right), geom.dot(record.point, up))))
             by_key[key] = (tag, head)
 
@@ -452,7 +520,11 @@ class Declutterer(object):
                 nudged += 1
             except Exception:
                 continue
-        report.note('Decluttering: {0}'.format(result.summary()))
+        report.note('Decluttering: {0} (gap {1:.2f} ft, limit {2:.2f} ft at '
+                    'this scale)'.format(
+                        result.summary(),
+                        self._paper_to_model(self.options.declutter_gap_inches),
+                        self._paper_to_model(self.options.declutter_max_shift_inches)))
         if result.remaining_overlaps:
             report.note('  {0} tag(s) could not be separated without moving '
                         'further than the limit - raise "max shift" in the '

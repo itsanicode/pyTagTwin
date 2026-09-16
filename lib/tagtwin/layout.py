@@ -23,36 +23,83 @@ Pure Python, no Revit.
 from __future__ import division
 
 
+#: how a placement's offset is expressed
+VIEW_FRAME = 'view'      # right/up on the sheet - for elements with no direction
+HOST_FRAME = 'host'      # along/across the element itself - for pipes, ducts, conduit
+
+
 class Placement(object):
-    """Where a tag sits relative to the element it labels, in view axes."""
+    """Where a tag sits relative to the element it labels.
 
-    __slots__ = ('tag_type', 'offset', 'elbow', 'orientation', 'has_leader')
+    For anything with a direction - a pipe, a duct, a length of conduit - the
+    offset is held in the **element's own frame**: how far along it, as a
+    fraction of its length, and how far out to the side. Holding it as a plain
+    right/up offset from the element's midpoint looks equivalent and is not: a
+    tag placed near the top of a twenty foot riser learns "ten feet up", and
+    putting a four foot branch's tag ten feet above *its* midpoint strands it
+    eight feet past the end of the pipe. Lengths vary enormously in a riser, so
+    that one mistake scatters tags across the sheet.
 
-    def __init__(self, tag_type, offset, elbow=None, orientation=None,
-                 has_leader=True):
+    ``across`` is a drawing distance and scales with the view scale. ``along``
+    is a fraction of the host, so it follows the host instead.
+    """
+
+    __slots__ = ('tag_type', 'offset', 'elbow', 'orientation', 'has_leader',
+                 'frame', 'along', 'across')
+
+    def __init__(self, tag_type, offset=(0.0, 0.0), elbow=None, orientation=None,
+                 has_leader=True, frame=VIEW_FRAME, along=0.0, across=0.0):
         self.tag_type = tag_type
         self.offset = (float(offset[0]), float(offset[1]))
+        #: the elbow, held relative to the *head* rather than to the element, so
+        #: the leader keeps its shape wherever the head ends up
         self.elbow = None if elbow is None else (float(elbow[0]), float(elbow[1]))
         self.orientation = orientation
         self.has_leader = has_leader
+        self.frame = frame
+        self.along = float(along)
+        self.across = float(across)
 
-    def scaled(self, factor):
-        """The same placement at another view scale."""
-        if factor == 1.0:
-            return self
-        elbow = None if self.elbow is None else (self.elbow[0] * factor,
-                                                 self.elbow[1] * factor)
-        return Placement(self.tag_type,
-                         (self.offset[0] * factor, self.offset[1] * factor),
-                         elbow, self.orientation, self.has_leader)
+    def offset_in_view(self, axis=None, length=None, scale=1.0):
+        """The right/up offset to use for a host with this axis and length."""
+        if self.frame == HOST_FRAME and axis is not None and length:
+            along = self.along * length
+            across = self.across * scale
+            return (axis[0] * along - axis[1] * across,
+                    axis[1] * along + axis[0] * across)
+        return (self.offset[0] * scale, self.offset[1] * scale)
+
+    def elbow_in_view(self, scale=1.0):
+        """The elbow's offset from the head, at this view scale."""
+        if self.elbow is None:
+            return None
+        return (self.elbow[0] * scale, self.elbow[1] * scale)
 
     @property
     def distance(self):
+        if self.frame == HOST_FRAME:
+            return abs(self.across)
         return (self.offset[0] ** 2 + self.offset[1] ** 2) ** 0.5
 
     def __repr__(self):
+        if self.frame == HOST_FRAME:
+            return '<Placement {0} along {1:.2f} across {2:.2f}>'.format(
+                self.tag_type, self.along, self.across)
         return '<Placement {0} ({1:.2f}, {2:.2f})>'.format(
             self.tag_type, self.offset[0], self.offset[1])
+
+
+def host_frame_offset(offset, axis, length):
+    """Turn a right/up offset into ``(along fraction, across)`` for a host.
+
+    ``axis`` is the host's direction in the view plane, as a unit 2D vector;
+    ``length`` is how long the host is once projected onto that plane.
+    """
+    if not length:
+        return 0.0, 0.0
+    along = offset[0] * axis[0] + offset[1] * axis[1]
+    across = -offset[0] * axis[1] + offset[1] * axis[0]
+    return along / length, across
 
 
 class TagSample(object):
@@ -104,13 +151,23 @@ def _average(placements):
         return None
     if len(placements) == 1:
         return placements[0]
-    mean_right = sum(p.offset[0] for p in placements) / float(len(placements))
-    mean_up = sum(p.offset[1] for p in placements) / float(len(placements))
-
-    def distance_to_mean(placement):
-        return ((placement.offset[0] - mean_right) ** 2
-                + (placement.offset[1] - mean_up) ** 2)
-    return min(placements, key=distance_to_mean)
+    # host-framed and view-framed placements are not comparable, so pick the
+    # representative from whichever frame the category mostly uses
+    host_framed = [p for p in placements if p.frame == HOST_FRAME]
+    pool = host_framed if len(host_framed) * 2 >= len(placements) else [
+        p for p in placements if p.frame == VIEW_FRAME]
+    if not pool:
+        pool = placements
+    if len(pool) == 1:
+        return pool[0]
+    if pool[0].frame == HOST_FRAME:
+        mean_a = sum(p.along for p in pool) / float(len(pool))
+        mean_b = sum(p.across for p in pool) / float(len(pool))
+        return min(pool, key=lambda p: (p.along - mean_a) ** 2 + (p.across - mean_b) ** 2)
+    mean_a = sum(p.offset[0] for p in pool) / float(len(pool))
+    mean_b = sum(p.offset[1] for p in pool) / float(len(pool))
+    return min(pool, key=lambda p: (p.offset[0] - mean_a) ** 2
+               + (p.offset[1] - mean_b) ** 2)
 
 
 class LayoutRecipe(object):
@@ -244,11 +301,14 @@ class Assignment(object):
                                                    self.how)
 
 
-def assign(hosts, recipe, scale=1.0):
+def assign(hosts, recipe):
     """Work out a placement for every host in the view being arranged.
 
     Hosts are ranked within their own signature using the same reading order
     the recipe was built with, so a staggered run replays in the same sequence.
+
+    The placements come back unscaled: turning one into a position needs the
+    target host's own axis and length, which only the caller has.
     """
     ranked = {}
     grouped = {}
@@ -263,8 +323,6 @@ def assign(hosts, recipe, scale=1.0):
     for host in hosts:
         rank = ranked[host.key]
         placement, how = recipe.placement_for(host.signature, host.category, rank)
-        if placement is not None and scale != 1.0:
-            placement = placement.scaled(scale)
         assignments.append(Assignment(host.key, placement, how, rank))
     return assignments
 
