@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # only needed by the test that the pyRevit bundle metadata parses
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      # The matching engine has no Revit dependency, and the Revit layer is
+      # checked against a stub, so the whole suite runs on a plain runner.
+      # The suite also fails if dist/pyTagTwin.zip is stale or if the repo root
+      # has stopped being a valid pyRevit extension bundle, so a green run means
+      # the download and the Extension Manager install both still work.
+      - name: Run the test suite
+        run: python tests/run_tests.py -v
+
+      - name: Upload the installable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyTagTwin
+          path: dist/pyTagTwin.zip
+          if-no-files-found: error

@@ -1,0 +1,4 @@
+title: "Replicate\nAnnotations"
+author: Aniket Kesari
+tooltip: >-
+  Copy the tags, dimensions and annotations of the active view into other views that show the same thing. Every tag is re-hosted onto the matching element in the target view, so it reads its own value instead of going blank.

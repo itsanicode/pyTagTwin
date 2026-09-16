@@ -1,0 +1,6 @@
+{
+    "name": "pyTagTwin",
+    "description": "Replicate tags, dimensions and annotations between views that show the same thing, by matching identical elements.",
+    "author": "Aniket Kesari",
+    "website": "https://github.com/itsanicode/pyTagTwin"
+}
