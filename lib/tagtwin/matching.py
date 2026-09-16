@@ -177,17 +177,22 @@ class SolveResult(object):
 
         Coverage is the bulk of it, discounted when matches needed relaxed
         signatures or when a rival transform scored as well as the winner.
+
+        This is a description, not a verdict on whether to run: a view full of
+        untagged pipework scores low while still carrying every tag across.
+        Use :class:`tagtwin.outlook.AnnotationOutlook` to decide that.
         """
         result = self.match_result
         if not result.matches:
             return 0.0
-        score = result.coverage
-        exact_share = result.exact_count / float(len(result.matches))
-        score *= 0.75 + 0.25 * exact_share
-        if result.ambiguous_count:
-            score *= max(0.5, 1.0 - result.ambiguous_count / float(len(result.matches)))
+        count = float(len(result.matches))
+        # One combined discount rather than three multiplied together - stacking
+        # them dragged an otherwise good match down into "poor" territory.
+        penalty = 0.15 * (1.0 - result.exact_count / count)
+        penalty += 0.20 * (result.ambiguous_count / count)
         if not self.alignment_result.is_unambiguous:
-            score *= 0.85
+            penalty += 0.10
+        score = result.coverage * max(0.55, 1.0 - penalty)
         return max(0.0, min(1.0, score))
 
     def verdict(self):

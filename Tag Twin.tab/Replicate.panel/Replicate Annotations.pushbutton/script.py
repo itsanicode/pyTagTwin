@@ -52,13 +52,13 @@ def main():
             analyses.append(engine.analyze(source, view, options))
 
     ui.print_analysis(output, source, analyses)
-    usable = [a for a in analyses if a.verdict != 'poor']
+    # Run whenever something can actually be placed. How well the views match
+    # overall is reported, but it does not decide: a riser is mostly untagged
+    # pipework, so element coverage can read low while every tagged element
+    # matched.
+    usable = [a for a in analyses if a.is_worth_running]
     if not usable:
-        forms.alert('None of the selected views matches "{0}" well enough to '
-                    'copy anything.\n\nThe match report lists what was found. '
-                    'Raising the tolerance in the settings often helps when the '
-                    'second layout was modelled by hand.'.format(source.name),
-                    title='Tag Twin')
+        forms.alert(ui.nothing_to_place_message(source, analyses), title='Tag Twin')
         return
 
     if not ui.confirm(ui.run_prompt(source, analyses, usable)):
@@ -69,8 +69,8 @@ def main():
         if analysis not in usable:
             report = results.ViewReport(analysis.view_id, analysis.name,
                                         analysis.solve_result)
-            report.aborted = ('only {0:.0%} of the source elements matched'
-                              .format(analysis.coverage))
+            report.aborted = ('no annotation could be placed - none of the '
+                              'tagged elements has a twin here')
             run_report.add(report)
 
     with revit.TransactionGroup('Tag Twin: replicate annotations', doc=doc):

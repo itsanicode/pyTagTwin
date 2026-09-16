@@ -48,7 +48,9 @@ def main():
         output.print_md('- Transform: {0}'.format(analysis.describe_alignment()))
         output.print_md('- Confidence: {0:.0%} ({1})'.format(
             analysis.confidence, analysis.verdict))
-        ui.print_match_detail(output, analysis)
+        output.print_md('- **Would copy: {0}**'.format(
+            analysis.outlook.summary() if analysis.outlook else 'nothing'))
+        ui.print_match_detail(output, analysis, source)
     output.print_md('---')
     output.print_md('_Nothing was changed. Use **Replicate Annotations** to '
                     'copy the annotations across._')

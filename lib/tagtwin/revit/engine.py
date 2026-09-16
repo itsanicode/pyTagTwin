@@ -7,8 +7,11 @@ reading and fingerprinting a view is the expensive half of a run.
 
 from __future__ import division
 
-from tagtwin import matching, results, signature as sig
+from tagtwin import matching, outlook, results, signature as sig
 from tagtwin.revit import annotations, collect, compat
+
+#: annotations that need every one of their references, not just one
+NEEDS_ALL_HOSTS = (annotations.KIND_DIMENSION, annotations.KIND_SPOT)
 
 
 class SourceContext(object):
@@ -39,10 +42,11 @@ class SourceContext(object):
 class TargetAnalysis(object):
     """What was worked out about one target view, before anything is changed."""
 
-    def __init__(self, view, records, solve_result):
+    def __init__(self, view, records, solve_result, annotation_outlook=None):
         self.view = view
         self.records = records
         self.solve_result = solve_result
+        self.outlook = annotation_outlook
 
     @property
     def name(self):
@@ -68,6 +72,20 @@ class TargetAnalysis(object):
     def matched(self):
         return len(self.solve_result.match_result.matches)
 
+    @property
+    def placeable(self):
+        return self.outlook.placeable if self.outlook else 0
+
+    @property
+    def is_worth_running(self):
+        """Whether anything at all would be created in this view.
+
+        Deliberately not "does the view match well". A riser is mostly untagged
+        pipework, so element coverage can look poor while every tagged element
+        matched perfectly.
+        """
+        return bool(self.outlook and self.outlook.is_worth_running)
+
     def describe_alignment(self):
         return self.solve_result.alignment.describe()
 
@@ -83,7 +101,9 @@ def analyze(source, target_view, options):
     """Work out how ``target_view`` lines up with the source. Changes nothing."""
     records = collect.collect_model_elements(source.doc, target_view, options)
     solve_result = matching.solve(source.records, records, options)
-    return TargetAnalysis(target_view, records, solve_result)
+    annotation_outlook = outlook.assess(source.items, solve_result.id_map,
+                                        NEEDS_ALL_HOSTS)
+    return TargetAnalysis(target_view, records, solve_result, annotation_outlook)
 
 
 def replicate(source, analysis, options):
@@ -111,6 +131,8 @@ def replicate(source, analysis, options):
     report.note('Matched {0} of {1} source elements ({2:.0%}, {3})'.format(
         analysis.matched, analysis.solve_result.match_result.source_count,
         analysis.coverage, analysis.verdict))
+    if analysis.outlook is not None:
+        report.note('Annotations: {0}'.format(analysis.outlook.summary()))
     if replicator.scale != 1.0:
         report.note('View scale differs - annotation offsets scaled by '
                     '{0:.2f}'.format(replicator.scale))

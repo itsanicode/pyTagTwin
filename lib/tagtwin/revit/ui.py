@@ -165,23 +165,71 @@ def short_error(error):
     return ' '.join(str(text).split())[:300]
 
 
+def nothing_to_place_message(source, analyses):
+    """Say *why* a run would create nothing, not just that it would.
+
+    "These views do not match well enough" is useless on its own - the useful
+    part is which of the three things went wrong.
+    """
+    if not source.items:
+        return ('"{0}" has no annotation that Tag Twin can copy.'
+                .format(source.name))
+
+    lines = ['Nothing can be copied from "{0}" into the selected view(s).'
+             .format(source.name), '']
+    for analysis in analyses:
+        outlook = analysis.outlook
+        if outlook is None:
+            lines.append('  {0} - could not be analysed'.format(analysis.name))
+            continue
+        lines.append('  {0} - {1} of {2} elements matched, {3} of {4} tagged '
+                     'elements'.format(analysis.name, analysis.matched,
+                                       analysis.solve_result.match_result.source_count,
+                                       outlook.hosted_matched, outlook.hosted_total))
+    lines.append('')
+
+    hosted = max([a.outlook.hosted_total for a in analyses if a.outlook] or [0])
+    matched_any = any(a.outlook.hosted_matched for a in analyses if a.outlook)
+    if not hosted:
+        lines.append('Every annotation in the source view is attached to an '
+                     'element, but none of those elements could be read. Run '
+                     'Preview Match for the detail.')
+    elif not matched_any:
+        lines.append('None of the tagged elements has a twin in those views. '
+                     'The usual causes, in order:')
+        lines.append('')
+        lines.append('  1. The tagged elements are not visible in the target '
+                     'view - they have to be there for a tag to attach to.')
+        lines.append('  2. The second layout was modelled by hand rather than '
+                     'copied, so nothing lands inside the tolerance. Raise the '
+                     'matching tolerance in Settings.')
+        lines.append('  3. The two views really are showing different things.')
+    else:
+        lines.append('Some elements matched, but none of them is one that '
+                     'carries an annotation.')
+    lines.append('')
+    lines.append('Preview Match lists every element that did and did not pair '
+                 'up, with clickable ids.')
+    return '\n'.join(lines)
+
+
 def run_prompt(source, analyses, usable):
     """The last thing the user reads before anything is written to the model."""
+    total = sum(a.placeable for a in usable)
     lines = ['About to copy {0} annotation(s) from "{1}" into {2} view(s):'
-             .format(source.annotation_count, source.name, len(usable)), '']
+             .format(total, source.name, len(usable)), '']
     for analysis in analyses:
         if analysis in usable:
-            lines.append('  {0} - {1:.0%} of elements matched ({2})'.format(
-                analysis.name, analysis.coverage, analysis.verdict))
+            lines.append('  {0} - {1}'.format(analysis.name,
+                                              analysis.outlook.summary()))
         else:
-            lines.append('  {0} - skipped, too little matched ({1:.0%})'.format(
-                analysis.name, analysis.coverage))
-    weak = [a for a in usable if a.verdict == 'partial']
-    if weak:
+            lines.append('  {0} - nothing to place, skipped'.format(analysis.name))
+    partial = [a for a in usable if a.outlook.blocked]
+    if partial:
         lines.append('')
-        lines.append('{0} view(s) matched only partially. Annotations on '
-                     'unmatched elements will be skipped and listed in the '
-                     'report.'.format(len(weak)))
+        lines.append('{0} view(s) will skip some annotations because the '
+                     'element they point at has no twin. Every one is listed '
+                     'in the report with its reason.'.format(len(partial)))
     lines.append('')
     lines.append('This can be undone in one step. Carry on?')
     return '\n'.join(lines)
@@ -218,25 +266,54 @@ def print_analysis(output, source, analyses):
 
     rows = []
     for analysis in analyses:
+        outlook = analysis.outlook
         rows.append([
             view_link(output, analysis.view_id, analysis.name),
-            len(analysis.records),
+            '{0} / {1}'.format(outlook.placeable, outlook.total) if outlook else '-',
+            '{0:.0%}'.format(outlook.host_coverage) if outlook else '-',
             '{0} / {1}'.format(analysis.matched,
                                analysis.solve_result.match_result.source_count),
             '{0:.0%}'.format(analysis.coverage),
-            '{0:.0%}'.format(analysis.confidence),
             analysis.verdict,
             analysis.describe_alignment(),
         ])
     output.print_table(
-        rows, title='How the views line up',
-        columns=['Target view', 'Elements', 'Matched', 'Coverage',
-                 'Confidence', 'Verdict', 'Transform'])
+        rows, title='What would be copied',
+        columns=['Target view', 'Annotations', 'Tagged elements',
+                 'All elements', 'Coverage', 'Match', 'Transform'])
+    output.print_md(
+        '_**Annotations** is what decides whether a run does anything: how many '
+        'of the source annotations have a matched element to hang on. '
+        '**Tagged elements** is the share of the elements that carry an '
+        'annotation which found a twin. **Coverage** counts every model element '
+        'in the view, tagged or not - a riser that is mostly bare pipework reads '
+        'low here and still copies across perfectly._')
 
 
-def print_match_detail(output, analysis, limit=40):
-    """Per-element detail for the preview tool."""
+def print_match_detail(output, analysis, source=None, limit=40):
+    """Per-element detail for the preview tool.
+
+    When ``source`` is given, the elements that actually carry an annotation are
+    called out first. Those are the only unmatched elements that cost you
+    anything - the rest of a riser is bare pipework nobody tags.
+    """
     result = analysis.solve_result.match_result
+    if source is not None:
+        hosts = set()
+        for item in source.items:
+            hosts.update(item.host_ids or ())
+        stranded = [r for r in result.unmatched_source if r.key in hosts]
+        if stranded:
+            output.print_md(
+                '**{0} element(s) carrying an annotation have no twin here.** '
+                'Their annotations are what would be skipped - check they are '
+                'visible in the target view:'.format(len(stranded)))
+            output.print_table(
+                [[output.linkify(compat.to_eid(r.key)), r.label]
+                 for r in stranded[:limit]],
+                columns=['Element', 'Type'])
+        elif hosts:
+            output.print_md('**Every annotated element found a twin.**')
     relaxed = [m for m in result.matches if not m.is_exact]
     ambiguous = [m for m in result.matches if m.ambiguous]
     if relaxed:
@@ -251,8 +328,9 @@ def print_match_detail(output, analysis, limit=40):
         output.print_md('**{0} element(s) had more than one equally good '
                         'candidate** - the nearest was used:'.format(len(ambiguous)))
     if result.unmatched_source:
-        output.print_md('**{0} source element(s) have no twin** - annotations on '
-                        'them will be skipped:'.format(len(result.unmatched_source)))
+        output.print_md('{0} source element(s) have no twin. Most of these will '
+                        'be untagged pipework, which costs nothing:'.format(
+                            len(result.unmatched_source)))
         rows = [[output.linkify(compat.to_eid(r.key)), r.label]
                 for r in result.unmatched_source[:limit]]
         output.print_table(rows, columns=['Element', 'Type'])

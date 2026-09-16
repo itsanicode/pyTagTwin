@@ -109,15 +109,22 @@ repository works too, and installs only the parts Revit loads.
 3. Pick the target views. Views of the same type are listed first.
 4. Read the match report that appears, then confirm.
 
-The report gives a coverage and a confidence figure per view before anything is
+The report shows, per view, what would actually be copied before anything is
 written:
 
-| Verdict | Meaning |
+| Column | Meaning |
 | --- | --- |
-| excellent | Nearly every element paired up exactly and no other transform came close. Go ahead. |
-| good | Most elements paired up. Anything unmatched is listed. |
-| partial | Only part of the view matched — the two views are similar but not the same. Annotations on unmatched elements are skipped. |
-| poor | These views are not showing the same thing. The view is left alone. |
+| **Annotations** | How many of the source annotations have a matched element to hang on. **This is what decides whether a run does anything.** |
+| **Tagged elements** | The share of the elements that carry an annotation which found a twin. The figure that predicts success. |
+| **All elements / Coverage** | Every model element in the view, tagged or not. Background information only. |
+| **Match** | excellent / good / partial / poor — a description of how alike the two views are, not a verdict on whether to run. |
+
+A view is run whenever **one or more annotations can be placed**, whatever the
+overall coverage says. A riser diagram is mostly bare pipework that nobody tags,
+so *Coverage* routinely reads low on a view whose every tag copies across
+perfectly — refusing on that number would be refusing the job the tool exists to
+do. When nothing can be placed, the message says which of the three usual causes
+it was rather than just declining.
 
 A whole run is one undo step.
 
@@ -276,7 +283,8 @@ IronPython 2.7).
 | The Tag Twin tab does not appear | pyRevit is not installed, or it has not reloaded. Click **pyRevit → Reload**. Check that `%APPDATA%\pyRevit\Extensions\pyTagTwin.extension` exists and holds `lib` and `Tag Twin.tab`. |
 | **Add and install** did nothing | Check the install path in the Extension Manager, then look for `pyTagTwin.extension` inside it. If the folder is there but empty, git could not reach GitHub from that machine — use the zip instead. |
 | "Revit only allows tags and dimensions in a locked 3D view" | Apply *Save Orientation and Lock View* to the target 3D view, or switch on **Lock target 3D views automatically**. |
-| Verdict is *poor* on views that look the same | The two views are showing different elements, or the tolerance is too tight for a hand-modelled second suite. Raise the tolerance and use **Preview Match** to see what failed. |
+| "Nothing can be copied" although Preview Match found plenty | The elements that matched are not the ones carrying annotations. Preview Match now lists the annotated elements that have no twin — usually they are simply not visible in the target view, which they must be for a tag to attach. |
+| Match reads *poor* but the run works fine | Expected on a riser: coverage counts every pipe and fitting, most of which carry no tag. Look at **Annotations** and **Tagged elements** instead. |
 | Everything matched but tags were skipped | Read the reason column. Usually the tagged element is not *visible in the target view* — it has to be, or there is nothing to tag. |
 | Tags landed in the wrong place | The two views probably look different ways. Try forcing **Offsets** to `view` in the settings. |
 | A mirrored suite matched the wrong way round | A symmetric layout has more than one valid answer. Turn off **Match mirrored layouts** to force the unmirrored one. |
