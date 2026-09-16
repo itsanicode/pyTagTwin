@@ -116,7 +116,9 @@ repository works too, and installs only the parts Revit loads.
 
 The path that does not depend on the two views matching up.
 
-1. **Open the view that is already tagged** the way you want.
+1. **Open the view that is already tagged** the way you want. Working on the
+   sheet is fine — Tag Twin resolves a sheet to the view placed on it, and asks
+   which one when there is more than one.
 2. **Tag Twin → Tag Like View**.
 3. Pick the views to tag. Read what it learned, then confirm.
 
@@ -330,6 +332,7 @@ IronPython 2.7).
 
 | Symptom | Cause / fix |
 | --- | --- |
+| "Tag Twin needs a drawing view" | The active view is a legend, a schedule, or a sheet with nothing on it. Open a plan, section, elevation, 3D or drafting view from the Project Browser. A sheet with views on it is handled for you. |
 | The Tag Twin tab does not appear | pyRevit is not installed, or it has not reloaded. Click **pyRevit → Reload**. Check that `%APPDATA%\pyRevit\Extensions\pyTagTwin.extension` exists and holds `lib` and `Tag Twin.tab`. |
 | **Add and install** did nothing | Check the install path in the Extension Manager, then look for `pyTagTwin.extension` inside it. If the folder is there but empty, git could not reach GitHub from that machine — use the zip instead. |
 | "Revit only allows tags and dimensions in a locked 3D view" | Apply *Save Orientation and Lock View* to the target 3D view, or switch on **Lock target 3D views automatically**. |

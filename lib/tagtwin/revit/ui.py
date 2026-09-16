@@ -161,6 +161,70 @@ def can_annotate(view):
         return False
 
 
+def views_on_sheet(doc, sheet):
+    """The drawing views placed on a sheet, in name order."""
+    from Autodesk.Revit import DB
+    found = []
+    try:
+        placed = sheet.GetAllPlacedViews()
+    except Exception:
+        placed = []
+        try:
+            for viewport in DB.FilteredElementCollector(doc).OfClass(DB.Viewport):
+                if compat.eid_value(viewport.SheetId) == compat.eid_value(sheet.Id):
+                    placed.append(viewport.ViewId)
+        except Exception:
+            placed = []
+    for view_id in placed:
+        view = doc.GetElement(view_id)
+        if view is not None and can_annotate(view):
+            found.append(view)
+    found.sort(key=lambda v: v.Name)
+    return found
+
+
+def resolve_drawing_view(doc, view, purpose='work on'):
+    """Turn whatever is open into a drawing view, or explain why it cannot.
+
+    Working on a sheet rather than in the view itself is normal, so a sheet is
+    resolved to the view placed on it instead of being refused.
+
+    Returns ``(view, message)``; exactly one of the two is set.
+    """
+    from Autodesk.Revit import DB
+    if view is None:
+        return None, 'Open a project view first.'
+    if can_annotate(view):
+        return view, None
+
+    if isinstance(view, DB.ViewSheet):
+        candidates = views_on_sheet(doc, view)
+        if not candidates:
+            return None, ('Sheet "{0}" has no drawing view on it to {1}.\n\n'
+                          'Open the view itself from the Project Browser.'
+                          .format(view.Name, purpose))
+        if len(candidates) == 1:
+            return candidates[0], None
+        chosen = forms.SelectFromList.show(
+            [ViewItem(v) for v in candidates],
+            title='Which view on "{0}" do you want to {1}?'.format(
+                view.Name, purpose),
+            button_name='Use this view', multiselect=False, width=620)
+        chosen = chosen.unwrap() if hasattr(chosen, 'unwrap') else chosen
+        if chosen is None:
+            return None, ''
+        return chosen, None
+
+    try:
+        kind = str(view.ViewType)
+    except Exception:
+        kind = 'that'
+    return None, ('Tag Twin needs a drawing view - a plan, section, elevation, '
+                  '3D view or drafting view.\n\n"{0}" is a {1}.\n\nOpen the '
+                  'view you want to {2} from the Project Browser.'
+                  .format(getattr(view, 'Name', 'The active view'), kind, purpose))
+
+
 def short_error(error):
     text = getattr(error, 'Message', None) or str(error)
     return ' '.join(str(text).split())[:300]

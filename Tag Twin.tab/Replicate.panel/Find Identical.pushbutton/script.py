@@ -25,8 +25,15 @@ output = script.get_output()
 
 
 def main():
-    if doc is None or active_view is None:
-        forms.alert('Open a project view first.', title='Tag Twin')
+    global active_view
+    if doc is None:
+        forms.alert('Open a project first.', title='Tag Twin')
+        return
+    active_view, problem = ui.resolve_drawing_view(doc, active_view,
+                                                   'search in')
+    if active_view is None:
+        if problem:
+            forms.alert(problem, title='Tag Twin')
         return
 
     selection = revit.get_selection()

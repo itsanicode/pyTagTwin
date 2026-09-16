@@ -19,12 +19,17 @@ output = script.get_output()
 
 
 def main():
-    if doc is None or source_view is None:
-        forms.alert('Open a project view first.', title='Tag Twin')
+    global source_view
+    if doc is None:
+        forms.alert('Open a project first.', title='Tag Twin')
         return
-    if not ui.can_annotate(source_view):
-        forms.alert('Tag Twin works between drawing views - sheets, schedules '
-                    'and legends have nothing to match.', title='Tag Twin')
+    # a sheet is what is open half the time - resolve it to the view
+    # placed on it rather than refusing
+    source_view, problem = ui.resolve_drawing_view(doc, source_view,
+                                                   'copy annotations from')
+    if source_view is None:
+        if problem:
+            forms.alert(problem, title='Tag Twin')
         return
 
     options = ui.load_options()
