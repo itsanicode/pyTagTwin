@@ -78,7 +78,7 @@ def test_package_has_what_the_installer_needs():
     # all four buttons, with their icons
     buttons = set(n.split('/')[4] for n in names
                   if '.pushbutton/' in n and n.count('/') > 4)
-    assert len(buttons) == 4, buttons
+    assert len(buttons) == 5, buttons
     for button in buttons:
         for part in ('script.py', 'icon.png', 'bundle.yaml'):
             path = bundle + '/Tag Twin.tab/Replicate.panel/{0}/{1}'

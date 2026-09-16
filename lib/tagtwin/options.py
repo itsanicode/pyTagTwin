@@ -33,6 +33,8 @@ class MatchOptions(object):
         ('adapt_to_view_scale', True),
         ('rehost_to_matched_point', True),
         ('skip_existing', True),
+        ('tag_untagged_elements', True),
+        ('layout_match_level', 'exact'),
         ('lock_3d_views', False),
         ('copy_tags', True),
         ('copy_dimensions', True),
@@ -59,6 +61,19 @@ class MatchOptions(object):
             if field == name:
                 return default
         raise KeyError(name)
+
+    @property
+    def layout_level(self):
+        """How alike two elements must be to share a tag position.
+
+        Looser than element matching needs to be: the question is only "does
+        this kind of element get its tag up and to the left", so the system and
+        type usually carry it even when sizes differ.
+        """
+        return {'exact': signature.STRICT,
+                'type+system': signature.MEDIUM,
+                'type': signature.LOOSE}.get(self.layout_match_level,
+                                             signature.MEDIUM)
 
     @property
     def levels(self):

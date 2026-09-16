@@ -24,6 +24,7 @@ TOGGLES = (
     ('rehost_to_matched_point', 'Keep tags at the same offset from their element'),
     ('adapt_to_view_scale', 'Adjust offsets and text width for the view scale'),
     ('skip_existing', 'Skip annotations that are already there'),
+    ('tag_untagged_elements', 'Tag Like View: tag elements that have no tag yet'),
     ('lock_3d_views', 'Lock target 3D views automatically (needed for tags)'),
     ('copy_tags', 'Copy tags'),
     ('copy_dimensions', 'Copy dimensions'),
@@ -248,6 +249,71 @@ def view_link(output, view_id, name):
         return output.linkify(compat.to_eid(view_id), name)
     except Exception:
         return name
+
+
+def tag_like_prompt(source_view, recipe, targets, orphaned, options):
+    """What Tag Like View is about to do, before it touches the model."""
+    lines = ['Learned the tag layout of "{0}": {1}.'.format(
+        source_view.Name, recipe.describe()), '']
+    if orphaned:
+        lines.append('{0} tag(s) were ignored - the element they label is not '
+                     'in this view.'.format(orphaned))
+        lines.append('')
+    lines.append('About to apply it to {0} view(s):'.format(len(targets)))
+    for view in targets:
+        lines.append('  {0}'.format(view.Name))
+    lines.append('')
+    if options.tag_untagged_elements:
+        lines.append('Elements with no tag yet will be tagged, using the same '
+                     'tag type the reference view uses for that category. '
+                     'Existing tags are moved, not duplicated.')
+    else:
+        lines.append('Only tags that already exist will be moved - switch on '
+                     '"tag elements that have no tag yet" in the settings to '
+                     'place missing ones too.')
+    lines.append('')
+    lines.append('This can be undone in one step. Carry on?')
+    return '\n'.join(lines)
+
+
+def print_recipe(output, source_view, recipe, orphaned):
+    """What was learned, so a surprising result can be explained."""
+    output.print_md('## Tag Twin - layout learned from "{0}"'.format(
+        source_view.Name))
+    output.print_md('**{0}**'.format(recipe.describe()))
+    if orphaned:
+        output.print_md('_{0} tag(s) ignored: the element they label is not a '
+                        'model element of this view._'.format(orphaned))
+    rows = []
+    for category in sorted(recipe.by_category):
+        placement = recipe.by_category[category]
+        type_id = recipe.tag_type_for(category)
+        positions = sum(1 for signature in recipe.by_signature
+                        if recipe.by_signature[signature]
+                        and _category_of(recipe, signature) == category)
+        rows.append([
+            category,
+            output.linkify(compat.to_eid(type_id)) if type_id else '-',
+            positions or 1,
+            '{0:+.2f}, {1:+.2f} ft'.format(placement.offset[0],
+                                           placement.offset[1]),
+        ])
+    if rows:
+        output.print_table(
+            rows, title='Tag types and typical offsets',
+            columns=['Element category', 'Tag type', 'Distinct kinds',
+                     'Average offset (right, up)'])
+    output.print_md('_Offsets are measured along the view\'s own right and up '
+                    'axes, so they land the same way on the sheet whichever '
+                    'direction the target view looks._')
+
+
+def _category_of(recipe, signature):
+    """The category a signature belongs to - it is the first element of it."""
+    try:
+        return signature[0]
+    except Exception:
+        return None
 
 
 def print_analysis(output, source, analyses):

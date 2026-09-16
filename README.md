@@ -7,12 +7,22 @@ replicates the tags and annotations from one onto the other — intelligent
 copying rather than plain copy/paste.
 
 The case it is built for: a riser diagram, a typical bathroom suite, a repeated
-apartment layout — the same thing modelled twice. One view is fully annotated.
-The other is identical geometry with nothing on it. Copy/paste cannot help,
-because a pasted tag still points at the *original* suite's pipe and goes blank
-or reads the wrong value. Tag Twin works out which element in the second view
-corresponds to each element in the first, and then rebuilds every tag against
-**its own** element.
+apartment layout — the same thing drawn twice. One view is fully annotated. The
+other has nothing on it, and arranging the tags by hand is an afternoon.
+
+There are two ways to get from one to the other, and they fail differently:
+
+| | **Tag Like View** | **Replicate Annotations** |
+| --- | --- | --- |
+| What it copies | Tag types and tag *positions* | Every annotation, tags and dimensions and text alike |
+| What it needs | The same **kinds** of element in both views | A correct element-to-element **match** between the views |
+| Where it works | Views that are similar | Views that are the same thing modelled twice |
+| When it fails | A kind of element the reference view never tagged — that one tag is left where it was | No match, so nothing is placed at all |
+
+**Start with Tag Like View.** It lets Revit do the hosting, which Revit is good
+at, and does the part Revit does not do — putting every tag where the finished
+drawing puts it. Reach for Replicate Annotations when the two views really are
+the same suite twice and you also want the dimensions and text.
 
 ## What it does
 
@@ -101,6 +111,46 @@ administrator rights, nothing outside your user profile. To remove it, run
 repository works too, and installs only the parts Revit loads.
 
 ## Usage
+
+### Tag Like View
+
+The path that does not depend on the two views matching up.
+
+1. **Open the view that is already tagged** the way you want.
+2. **Tag Twin → Tag Like View**.
+3. Pick the views to tag. Read what it learned, then confirm.
+
+It does three things, and the fragile step is simply absent:
+
+1. **Learns** the arrangement of the open view — for every tag, which tag type
+   it is and how far it sits from its element, measured along the view's own
+   right and up axes.
+2. **Tags** whatever is untagged in the target view, using the tag type the
+   reference view uses for that category. This is Revit's *Tag All*, except the
+   tag type comes from the drawing you are copying rather than from a dialog,
+   and existing tags are left alone rather than duplicated.
+3. **Arranges** every tag onto the learned offset.
+
+Nowhere does it need to know that pipe #4021 in one view is pipe #8894 in the
+other. It only needs both views to contain the same *kinds* of element, so the
+target view can be a different size, a different suite, or a different building
+entirely.
+
+**Staggering is preserved.** Three identical valves tagged at three different
+offsets so their tags do not collide are stored in the order they appear in the
+view, and replayed in that order onto the target view's valves — read top to
+bottom, then left to right, in both views. If the target has more of them, the
+pattern repeats rather than piling every extra tag onto the last offset.
+
+**When a kind of element was never tagged** in the reference view, Tag Twin
+falls back to the typical offset for that category, and says so in the report.
+If the category is unknown too, the tag is left where Revit put it and listed.
+
+How alike two elements must be to share a tag position is looser than element
+matching needs to be — the question is only "does this kind of thing get its tag
+up and to the left". The default is the exact signature; drop it to *type and
+system* in the settings if a view tags several sizes of the same pipe the same
+way.
 
 ### Replicate Annotations
 
@@ -244,9 +294,9 @@ the rest is development scaffolding that pyRevit ignores.
 extension.json                 what the Extension Manager shows
 lib/tagtwin/                   the engine
   geom.py  signature.py  spatial.py  align.py  matching.py   pure Python, no Revit
-  options.py  results.py                                     pure Python, no Revit
+  layout.py  outlook.py  options.py  results.py              pure Python, no Revit
   revit/                       everything that touches the Revit API
-Tag Twin.tab/Replicate.panel/  the four ribbon buttons
+Tag Twin.tab/Replicate.panel/  the five ribbon buttons
 installer/                     install / uninstall without the Extension Manager
 dist/pyTagTwin.zip             the download - built from the folders above
 tests/                         the test suite - runs without Revit
@@ -283,6 +333,8 @@ IronPython 2.7).
 | The Tag Twin tab does not appear | pyRevit is not installed, or it has not reloaded. Click **pyRevit → Reload**. Check that `%APPDATA%\pyRevit\Extensions\pyTagTwin.extension` exists and holds `lib` and `Tag Twin.tab`. |
 | **Add and install** did nothing | Check the install path in the Extension Manager, then look for `pyTagTwin.extension` inside it. If the folder is there but empty, git could not reach GitHub from that machine — use the zip instead. |
 | "Revit only allows tags and dimensions in a locked 3D view" | Apply *Save Orientation and Lock View* to the target 3D view, or switch on **Lock target 3D views automatically**. |
+| Replicate Annotations will not place anything at all | Use **Tag Like View** instead. It needs no element match, only the same kinds of element, so it is the one to reach for when two views are similar rather than identical. |
+| Tag Like View left some tags where they were | The reference view never tagged that kind of element, so there was nothing to learn from. The report lists every one. Tag one of them in the reference view and run it again. |
 | "Nothing can be copied" although Preview Match found plenty | The elements that matched are not the ones carrying annotations. Preview Match now lists the annotated elements that have no twin — usually they are simply not visible in the target view, which they must be for a tag to attach. |
 | Match reads *poor* but the run works fine | Expected on a riser: coverage counts every pipe and fitting, most of which carry no tag. Look at **Annotations** and **Tagged elements** instead. |
 | Everything matched but tags were skipped | Read the reason column. Usually the tagged element is not *visible in the target view* — it has to be, or there is nothing to tag. |

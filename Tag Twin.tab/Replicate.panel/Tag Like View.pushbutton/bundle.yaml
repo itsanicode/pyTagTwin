@@ -1,0 +1,6 @@
+title: "Tag Like\nView"
+author: Aniket Kesari
+tooltip: >-
+  Learn how the active view is tagged and apply the same tag types and the same
+  tag positions to other views. Needs no element-to-element match between the
+  views, only the same kinds of element.

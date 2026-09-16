@@ -132,7 +132,7 @@ def test_every_button_is_complete():
                     assert os.path.isfile(os.path.join(button, required)), \
                         '{0} has no {1}'.format(entry, required)
                 buttons.append(entry)
-    assert len(buttons) == 4, buttons
+    assert len(buttons) == 5, buttons
 
 
 @case

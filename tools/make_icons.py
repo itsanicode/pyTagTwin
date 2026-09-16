@@ -278,10 +278,26 @@ def icon_settings():
     return canvas
 
 
+def icon_tag_like_view():
+    """A tagged frame on the left setting the position for the one on the right."""
+    canvas = Canvas()
+    _view_frame(canvas, 3, GREY)
+    _view_frame(canvas, 59, INK)
+    _tag(canvas, 3, GREY)
+    # the target: the same tag, snapped onto a dashed guide at the same offset
+    canvas.disc(68, 68, 3.5, INK)
+    canvas.line((68, 68), (74, 54), INK, 2.4)
+    canvas.rectangle(70, 30, 89, 52, ORANGE, radius=2.5)
+    for y in range(30, 53, 7):
+        canvas.line((62, y), (67, y), GREY, 2.0)
+    return canvas
+
+
 ICONS = (
     ('Replicate Annotations', icon_replicate),
     ('Preview Match', icon_preview),
     ('Find Identical', icon_find_identical),
+    ('Tag Like View', icon_tag_like_view),
     ('Settings', icon_settings),
 )
 

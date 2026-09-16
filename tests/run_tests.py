@@ -20,12 +20,13 @@ sys.path.insert(0, os.path.abspath(TOOLS))
 import test_compat      # noqa: E402
 import test_core        # noqa: E402
 import test_icons       # noqa: E402
+import test_layout      # noqa: E402
 import test_outlook     # noqa: E402
 import test_package     # noqa: E402
 import test_refs        # noqa: E402  - installs a fake Revit API
 
-MODULES = (test_core, test_outlook, test_refs, test_icons, test_package,
-           test_compat)
+MODULES = (test_core, test_layout, test_outlook, test_refs, test_icons,
+           test_package, test_compat)
 
 
 def main(argv):
